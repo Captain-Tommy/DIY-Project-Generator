@@ -144,13 +144,26 @@ async function callAIAPI(prompt) {
         });
 
         if (!response.ok) {
-            throw new Error('API request failed');
+            throw new Error(`API request failed with status ${response.status}`);
         }
 
         const data = await response.json();
-        return JSON.parse(data.content);
+        
+        // Add error handling for the content
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        // Handle both direct response and wrapped response
+        if (data.content) {
+            return JSON.parse(data.content);
+        } else if (data.projects) {
+            return data;
+        } else {
+            throw new Error('Invalid response format');
+        }
     } catch (error) {
-        console.error('Error:', error);
+        console.error('API Error:', error);
         throw error;
     }
 }
@@ -170,40 +183,39 @@ function displayProjectList(projects, append = false) {
         `;
     }
 
+    // Ensure projects is an array and has items
+    if (!Array.isArray(projects) || projects.length === 0) {
+        outputContainer.innerHTML = `
+            <div class="error-message">
+                <p>No projects were generated. Please try again with different criteria.</p>
+                <button class="retry-btn">Try Again</button>
+            </div>
+        `;
+        
+        // Add retry button functionality
+        const retryBtn = outputContainer.querySelector('.retry-btn');
+        if (retryBtn) {
+            retryBtn.addEventListener('click', () => {
+                generateProjectList(false);
+            });
+        }
+        return;
+    }
+
     currentProjects = [...currentProjects, ...projects];
     
     const projectOptions = outputContainer.querySelector('.project-options');
     projectOptions.innerHTML = currentProjects.map(project => `
-        <div class="project-option" data-project-id="${project.id}">
-            <div class="project-category">${project.category}</div>
+        <div class="project-option" data-project-id="${project.id || Math.random()}">
+            <div class="project-category">${project.category || 'General'}</div>
             <h4>${project.title}</h4>
             <p>${project.shortDescription}</p>
             <button class="select-project-btn">Select This Project</button>
         </div>
     `).join('');
 
-    // Add event listeners to select buttons
-    document.querySelectorAll('.select-project-btn').forEach(button => {
-        button.addEventListener('click', async (e) => {
-            const projectOption = e.target.closest('.project-option');
-            const projectTitle = projectOption.querySelector('h4').textContent;
-            await getDetailedProject(projectTitle);
-        });
-    });
-
-    // Add event listener to show more button
-    const showMoreBtn = outputContainer.querySelector('.show-more-btn');
-    showMoreBtn.addEventListener('click', async () => {
-        showMoreBtn.classList.add('loading');
-        showMoreBtn.textContent = 'Loading More Projects...';
-        try {
-            await generateProjectList(true);
-        } finally {
-            showMoreBtn.classList.remove('loading');
-            showMoreBtn.textContent = 'Show More Projects';
-        }
-    });
-
+    // Add event listeners
+    addProjectEventListeners();
     outputSection.style.display = 'block';
 }
 
@@ -352,30 +364,19 @@ async function generateProjectList(append = false) {
     };
 
     try {
-        let attempts = 0;
-        let uniqueProjects = null;
+        const prompt = createListPrompt(formData);
+        const results = await callAIAPI(prompt);
         
-        while (attempts < 3) {
-            const prompt = createListPrompt(formData);
-            const results = await callAIAPI(prompt);
-            
-            // Check if projects are unique
-            if (areProjectsUnique(results.projects, currentProjects)) {
-                uniqueProjects = results.projects;
-                break;
-            }
-            
-            attempts++;
+        // Check if we have valid projects
+        if (results && results.projects && Array.isArray(results.projects)) {
+            // Display all projects without strict uniqueness check
+            displayProjectList(results.projects, append);
+        } else {
+            throw new Error('Invalid response format');
         }
-
-        if (!uniqueProjects) {
-            throw new Error('Failed to generate unique projects after multiple attempts');
-        }
-
-        displayProjectList(uniqueProjects, append);
     } catch (error) {
         console.error('Error:', error);
-        alert('Failed to generate unique projects. Please try again with different criteria.');
+        alert('Failed to generate projects. Please try again.');
     }
 }
 
@@ -399,3 +400,61 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeMaterialsToggle();
     initializeScopeToggle();
 });
+
+// Add this helper function to handle event listeners
+function addProjectEventListeners() {
+    // Select project buttons
+    document.querySelectorAll('.select-project-btn').forEach(button => {
+        button.addEventListener('click', async (e) => {
+            const projectOption = e.target.closest('.project-option');
+            const projectTitle = projectOption.querySelector('h4').textContent;
+            await getDetailedProject(projectTitle);
+        });
+    });
+
+    // Show more button
+    const showMoreBtn = document.querySelector('.show-more-btn');
+    if (showMoreBtn) {
+        showMoreBtn.addEventListener('click', async () => {
+            showMoreBtn.classList.add('loading');
+            showMoreBtn.textContent = 'Loading More Projects...';
+            try {
+                await generateProjectList(true);
+            } finally {
+                showMoreBtn.classList.remove('loading');
+                showMoreBtn.textContent = 'Show More Projects';
+            }
+        });
+    }
+}
+
+// Add CSS for error message
+const style = document.createElement('style');
+style.textContent = `
+    .error-message {
+        text-align: center;
+        padding: 2rem;
+        background-color: var(--background-color);
+        border-radius: 8px;
+    }
+
+    .error-message p {
+        margin-bottom: 1rem;
+        color: #e74c3c;
+    }
+
+    .retry-btn {
+        background-color: var(--primary-color);
+        color: white;
+        padding: 0.8rem 1.5rem;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+    }
+
+    .retry-btn:hover {
+        background-color: #357abd;
+    }
+`;
+document.head.appendChild(style);
