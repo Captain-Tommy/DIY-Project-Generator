@@ -1,8 +1,0 @@
-{
-  "name": "diy-project-generator",
-  "version": "1.0.0",
-  "description": "DIY Project Generator using AI",
-  "dependencies": {
-    "node-fetch": "^2.6.1"
-  }
-} 
